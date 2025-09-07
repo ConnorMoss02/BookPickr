@@ -1,8 +1,7 @@
+// src/components/BookCard.tsx
 import React from "react";
 import type { Book } from "../types";
 
-// Props tell this component which book to show, what to do when clicked,
-// and which side it's on (for subtle styling).
 type Props = {
   book: Book;
   onPick: () => void;
@@ -11,20 +10,35 @@ type Props = {
 
 export default function BookCard({ book, onPick, accent }: Props) {
   return (
-    // Button makes the whole card clickable
     <button
       onClick={onPick}
-      // Keep styles simple; you can replace with Tailwind or CSS later
-      className={`w-full rounded-2xl p-16 text-left shadow transition hover:shadow-lg focus:outline-none ${
-        accent === "left" ? "border-blue-300" : "border-purple-300"
-      } border`}
+      className="w-full rounded-2xl p-6 text-left shadow transition hover:shadow-lg focus:outline-none border"
+      style={{ borderColor: accent === "left" ? "#93c5fd" : "#d8b4fe" }}
       aria-label={`Pick ${book.title} by ${book.author}`}
     >
-      <div>
-        <div style={{ fontSize: 40, lineHeight: 1 }}>📚</div>
-        <h3 style={{ marginTop: 12, fontWeight: 700, fontSize: 20 }}>{book.title}</h3>
-        <p style={{ color: "#666", fontSize: 14 }}>{book.author}</p>
-        <p style={{ marginTop: 8, color: "#888", fontSize: 12 }}>Click to pick this one</p>
+      <div style={{ display: "flex", gap: 12 }}>
+        <div
+          style={{
+            height: 56,
+            width: 56,
+            borderRadius: 12,
+            display: "grid",
+            placeItems: "center",
+            fontSize: 24,
+            background: accent === "left" ? "#eff6ff" : "#faf5ff",
+            border: "1px solid #eee",
+            flexShrink: 0,
+          }}
+        >
+          📚
+        </div>
+        <div>
+          <h3 style={{ fontSize: 20, fontWeight: 700 }}>{book.title}</h3>
+          <p style={{ color: "#666", fontSize: 14 }}>{book.author}</p>
+          <p style={{ marginTop: 8, color: "#888", fontSize: 12 }}>
+            Click to pick this one
+          </p>
+        </div>
       </div>
     </button>
   );
