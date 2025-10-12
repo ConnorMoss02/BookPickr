@@ -1,5 +1,5 @@
 // src/components/BookCard.tsx
-import React, { useState } from "react";
+import { useState } from "react";
 import type { Book } from "../types";
 
 type Props = {

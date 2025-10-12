@@ -1,5 +1,5 @@
 // src/components/BookPickr.tsx
-import React, { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { BOOKS } from "../data/books";
 import BookCard from "./BookCard";
 import { fetchCoverUrl, fetchSynopsis } from "../lib/openLibrary";
