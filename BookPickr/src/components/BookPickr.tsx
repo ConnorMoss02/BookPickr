@@ -148,7 +148,7 @@ export default function BookPickr() {
         />
       </div>
 
-      <section style={{ marginTop: 24 }}>
+      <section style={{ marginTop: 72 }}>
         <h2 className="h2">Top picks (so far)</h2>
         {leaderboard.length === 0 ? (
           <p className="muted">No results yet. Start picking!</p>
