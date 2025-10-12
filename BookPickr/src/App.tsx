@@ -1,4 +1,3 @@
-import React from "react";
 import BookPickr from "./components/BookPickr";
 import "./App.css";
 
