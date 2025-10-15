@@ -194,15 +194,11 @@ export default function BookPickr() {
                 : `Author – ${label.value}`}
             </span>
           )}
-          <Link to="/setup" className="btn">Setup</Link>
         </div>
 
         {/* Right: controls */}
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span className="badge">Rounds: {rounds}</span>
-          <span className="badge" title="Keyboard shortcuts">
-            <kbd>←</kbd> <kbd>→</kbd>
-          </span>
           <button className="btn" onClick={reset}>Reset</button>
         </div>
       </header>
