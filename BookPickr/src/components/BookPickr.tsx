@@ -110,21 +110,19 @@ export default function BookPickr() {
       <header
         style={{
           display: "flex",
-          justifyContent: "space-between",
+          justifyContent: "flex-end",
           alignItems: "center",
+          gap: 12,
           marginBottom: 16,
         }}
       >
-        <h1 className="h1">BookPickr</h1>
-        <div className="controls">
-          <span className="badge">Rounds: {rounds}</span>
-          <span className="badge" title="Keyboard shortcuts">
-            <kbd>←</kbd> <kbd>→</kbd>
-          </span>
-          <button className="btn" onClick={reset}>
-            Reset
-          </button>
-        </div>
+        <span className="badge">Rounds: {rounds}</span>
+        <span className="badge" title="Keyboard shortcuts">
+          <kbd>←</kbd> <kbd>→</kbd>
+        </span>
+        <button className="btn" onClick={reset}>
+          Reset
+        </button>
       </header>
 
       <p className="muted" style={{ marginBottom: 16 }}>
