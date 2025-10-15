@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import type { Book } from "../types";
+import { Link, useNavigate } from "react-router-dom";
+import type { SourceBook } from "../types";
 import { fetchSubjectBooks, fetchAuthorBooks, saveQueue, clearQueue } from "../lib/openLibrary";
 
 const SUBJECTS = [
@@ -15,31 +15,34 @@ export default function Setup() {
 
   // genre
   const [subject, setSubject] = useState("dystopian");
-  const [genreBooks, setGenreBooks] = useState<Book[]>([]);
+  const [genreBooks, setGenreBooks] = useState<SourceBook[]>([]);
   const [gLoading, setGLoading] = useState(false);
+  const [gTotal, setGTotal] = useState(0);
+  const [gPage, setGPage] = useState(0); // page as offset chunks of 50
 
   // author
   const [author, setAuthor] = useState("");
-  const [authorBooks, setAuthorBooks] = useState<Book[]>([]);
+  const [authorBooks, setAuthorBooks] = useState<SourceBook[]>([]);
   const [aLoading, setALoading] = useState(false);
 
   const nav = useNavigate();
 
-  // fetch genre list when subject changes
+  // fetch genre list when subject or page changes
   useEffect(() => {
     let alive = true;
     (async () => {
       setGLoading(true);
       try {
-        const books = await fetchSubjectBooks(subject, 50);
+        const { items, total } = await fetchSubjectBooks(subject, 50, gPage * 50);
         if (!alive) return;
-        setGenreBooks(books);
+        setGenreBooks(items);
+        setGTotal(total);
       } finally {
         if (alive) setGLoading(false);
       }
     })();
     return () => { alive = false; };
-  }, [subject]);
+  }, [subject, gPage]);
 
   async function onSearchAuthor(e: React.FormEvent) {
     e.preventDefault();
@@ -52,7 +55,7 @@ export default function Setup() {
     }
   }
 
-  function applyToPickr(books: Book[]) {
+  function applyQueue(books: SourceBook[]) {
     if (!books.length) return;
     saveQueue(books);
     nav("/"); // back to picker
@@ -63,39 +66,63 @@ export default function Setup() {
     nav("/");
   }
 
+  function coverURL(b: SourceBook, size: "S" | "M" = "S") {
+    return b.coverId ? `https://covers.openlibrary.org/b/id/${b.coverId}-${size}.jpg` : undefined;
+  }
+
   return (
     <div className="container" style={{ paddingTop: 20 }}>
-      <h1 className="h1">Setup</h1>
-      <p className="muted">Choose a genre or author to seed the BookPickr pool. You can always reset to the default 100.</p>
+      <h1 className="h1">What are you in the mood for?</h1>
+      <p className="muted">Pick a genre or author to seed your head-to-head matchups. You can switch anytime.</p>
 
       <div style={{ display: "flex", gap: 8, margin: "12px 0" }}>
         <button className="btn" onClick={() => setTab("genre")} aria-pressed={tab==="genre"}>By Genre</button>
         <button className="btn" onClick={() => setTab("author")} aria-pressed={tab==="author"}>By Author</button>
-        <button className="btn" onClick={clearAndUseDefault}>Use Default 100</button>
+        <button className="btn" onClick={clearAndUseDefault}>Use NYT Top 100</button>
+        <Link to="/" className="btn">Go to Picker</Link>
       </div>
 
       {tab === "genre" && (
         <section className="card" style={{ marginTop: 8 }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
             <label className="muted" htmlFor="subject">Subject</label>
             <select
               id="subject"
               value={subject}
-              onChange={(e) => setSubject(e.target.value)}
+              onChange={(e) => { setSubject(e.target.value); setGPage(0); }}
               style={{ padding: "8px 12px", borderRadius: 12, border: "1px solid var(--border)", background: "var(--panel)" }}
             >
               {SUBJECTS.map(s => <option key={s} value={s}>{s.replaceAll("_"," ")}</option>)}
             </select>
-            <span className="badge">{gLoading ? "Loading…" : `${genreBooks.length} books`}</span>
-            <button className="btn" disabled={!genreBooks.length} onClick={() => applyToPickr(genreBooks)}>
+            <span className="badge">
+              {gLoading ? "Loading…" : `Showing ${genreBooks.length} of ${gTotal.toLocaleString()}`}
+            </span>
+            <button className="btn" disabled={!genreBooks.length} onClick={() => applyQueue(genreBooks)}>
               Use these in BookPickr
             </button>
+            <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
+              <button className="btn" onClick={() => setGPage(p => Math.max(0, p-1))} disabled={gPage===0 || gLoading}>Prev</button>
+              <span className="badge">Page {gPage + 1}</span>
+              <button className="btn" onClick={() => setGPage(p => p + 1)} disabled={gLoading || (genreBooks.length === 0)}>Next</button>
+            </div>
           </div>
-          <ul className="list">
-            {genreBooks.slice(0,10).map(b => (
-              <li key={b.id} style={{ display:"flex", justifyContent:"space-between" }}>
-                <span>{b.title} <span className="muted">• {b.author}</span></span>
-                <span className="badge">preview</span>
+
+          {/* Scrollable preview list */}
+          <ul className="list" style={{ maxHeight: 360, overflow: "auto" }}>
+            {genreBooks.map(b => (
+              <li key={b.id} style={{ display:"flex", alignItems:"center", gap:12 }}>
+                <div className="card-icon" style={{ width: 40, height: 40 }}>
+                  {coverURL(b) ? <img src={coverURL(b)!} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", borderRadius: 8 }} /> : "📚"}
+                </div>
+                <div style={{ flex:1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{b.title}</div>
+                  <div className="muted" style={{ fontSize: 12 }}>{b.author}{b.year ? ` • ${b.year}` : ""}</div>
+                </div>
+                {b.workKey ? (
+                  <Link to={`/book/${b.workKey.replace("/works/","")}`} className="btn">Preview</Link>
+                ) : (
+                  <button className="btn" disabled title="No details available">Preview</button>
+                )}
               </li>
             ))}
           </ul>
@@ -104,7 +131,7 @@ export default function Setup() {
 
       {tab === "author" && (
         <section className="card" style={{ marginTop: 8 }}>
-          <form onSubmit={onSearchAuthor} style={{ display: "flex", gap: 8, alignItems:"center", marginBottom: 12 }}>
+          <form onSubmit={onSearchAuthor} style={{ display: "flex", gap: 8, alignItems:"center", marginBottom: 12, flexWrap: "wrap" }}>
             <input
               value={author}
               onChange={(e) => setAuthor(e.target.value)}
@@ -113,15 +140,27 @@ export default function Setup() {
             />
             <button className="btn" type="submit">Search</button>
             <span className="badge">{aLoading ? "Searching…" : `${authorBooks.length} books`}</span>
-            <button className="btn" disabled={!authorBooks.length} onClick={() => applyToPickr(authorBooks)}>
+            <button className="btn" disabled={!authorBooks.length} onClick={() => applyQueue(authorBooks)}>
               Use these in BookPickr
             </button>
           </form>
-          <ul className="list">
-            {authorBooks.slice(0,10).map(b => (
-              <li key={b.id} style={{ display:"flex", justifyContent:"space-between" }}>
-                <span>{b.title} <span className="muted">• {b.author}</span></span>
-                <span className="badge">preview</span>
+
+          {/* Scrollable author results */}
+          <ul className="list" style={{ maxHeight: 360, overflow: "auto" }}>
+            {authorBooks.map(b => (
+              <li key={b.id} style={{ display:"flex", alignItems:"center", gap:12 }}>
+                <div className="card-icon" style={{ width: 40, height: 40 }}>
+                  {b.coverId ? <img src={`https://covers.openlibrary.org/b/id/${b.coverId}-S.jpg`} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", borderRadius: 8 }} /> : "📚"}
+                </div>
+                <div style={{ flex:1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{b.title}</div>
+                  <div className="muted" style={{ fontSize: 12 }}>{b.author}{b.year ? ` • ${b.year}` : ""}</div>
+                </div>
+                {b.workKey ? (
+                  <Link to={`/book/${b.workKey.replace("/works/","")}`} className="btn">Preview</Link>
+                ) : (
+                  <button className="btn" disabled title="No details available">Preview</button>
+                )}
               </li>
             ))}
           </ul>
