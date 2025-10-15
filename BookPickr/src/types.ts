@@ -4,3 +4,9 @@ export type Book =
     title: string;
     author: string;
 };
+
+export type SourceBook = Book & {
+  workKey?: string;   
+  coverId?: number;  
+  year?: number;
+};
