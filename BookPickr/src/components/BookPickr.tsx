@@ -1,5 +1,5 @@
 // src/components/BookPickr.tsx
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import { BOOKS } from "../data/books";
 import BookCard from "./BookCard";
 import { fetchCoverUrl, fetchSynopsis } from "../lib/openLibrary";
@@ -52,7 +52,7 @@ export default function BookPickr() {
     return () => {
       alive = false;
     };
-  }, [championIndex, challengerIndex]);
+  }, [championIndex, challengerIndex, champion.title, champion.author, challenger.title, challenger.author]);
 
   // synopses
   useEffect(() => {
@@ -69,17 +69,17 @@ export default function BookPickr() {
     return () => {
       alive = false;
     };
-  }, [championIndex, challengerIndex]);
+  }, [championIndex, challengerIndex, champion.title, champion.author, challenger.title, challenger.author]);
 
-  function pick(newChampionIndex: number) {
+  const pick = useCallback((newChampionIndex: number) => {
     setScores((prev) => ({
       ...prev,
       [newChampionIndex]: (prev[newChampionIndex] || 0) + 1,
     }));
     setChampionIndex(newChampionIndex);
-    setChallengerIndex(getRandomIndex(BOOKS.length, [newChampionIndex, challengerIndex]));
+    setChallengerIndex(() => getRandomIndex(BOOKS.length, newChampionIndex));
     setRounds((r) => r + 1);
-  }
+  }, []);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -88,7 +88,7 @@ export default function BookPickr() {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [championIndex, challengerIndex]);
+  }, [championIndex, challengerIndex, pick]);
 
   function reset() {
     const first = getRandomIndex(BOOKS.length);
@@ -115,7 +115,7 @@ export default function BookPickr() {
           marginBottom: 16,
         }}
       >
-        <h1 className="h1">Book Pickr</h1>
+        <h1 className="h1">BookPickr</h1>
         <div className="controls">
           <span className="badge">Rounds: {rounds}</span>
           <span className="badge" title="Keyboard shortcuts">
