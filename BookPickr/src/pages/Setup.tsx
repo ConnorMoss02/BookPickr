@@ -73,13 +73,12 @@ export default function Setup() {
   return (
     <div className="container" style={{ paddingTop: 20 }}>
       <h1 className="h1">What are you in the mood for?</h1>
-      <p className="muted">Pick a genre or author to seed your head-to-head matchups. You can switch anytime.</p>
+      <p className="muted">Pick a genre or author to seed your head-to-head matchups.</p>
 
       <div style={{ display: "flex", gap: 8, margin: "12px 0" }}>
         <button className="btn" onClick={() => setTab("genre")} aria-pressed={tab==="genre"}>By Genre</button>
         <button className="btn" onClick={() => setTab("author")} aria-pressed={tab==="author"}>By Author</button>
         <button className="btn" onClick={clearAndUseDefault}>Use NYT Top 100</button>
-        <Link to="/" className="btn">Go to Picker</Link>
       </div>
 
       {tab === "genre" && (
