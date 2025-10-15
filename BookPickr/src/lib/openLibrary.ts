@@ -3,7 +3,8 @@
 // Centralized Open Library API helpers for BookPickr
 // ------------------------------------------------------------
 
-import type { Book } from "../types"; 
+import type { Book, SourceBook  } from "../types"; 
+
 
 // Be polite if you ever call these server-side. In browsers, this header is ignored.
 const UA = "BookPickr/0.1 (contact: conmoss30@gmail.com)";
@@ -183,16 +184,32 @@ export async function fetchSynopsis(title: string, author: string): Promise<Mayb
 /* Genre/Author book-pool helpers for setup screen */
 
 interface SubjectAuthor { name?: string }
-interface SubjectWork { title?: string; authors?: SubjectAuthor[] }
-interface SubjectResponse { works?: SubjectWork[] }
 
-/** Response types for Author search & works APIs */
-interface AuthorSearchDoc { key?: string }                 // e.g. "OL23919A"
+interface SubjectWork {
+  key?: string;                 // e.g. "/works/OL82563W"
+  title?: string;
+  authors?: SubjectAuthor[];
+  cover_id?: number;            // numeric cover id
+  first_publish_year?: number;  // e.g. 1954
+}
+
+interface SubjectResponse {
+  works?: SubjectWork[];
+  work_count?: number;
+}
+
+interface AuthorSearchDoc { key?: string }      // e.g. "OL23919A"
 interface AuthorSearchResponse { docs?: AuthorSearchDoc[] }
 
-interface AuthorWorksEntry { title?: string; subjects?: string[] }
-interface AuthorWorksResponse { entries?: AuthorWorksEntry[] }
+interface AuthorWorksEntry {
+  key?: string;                 // e.g. "/works/OL82563W"
+  title?: string;
+  covers?: number[];            // [8231856, ...]
+  first_publish_date?: string | number; // "1954" or "1954-07-29"
+  subjects?: string[];
+}
 
+interface AuthorWorksResponse { entries?: AuthorWorksEntry[] }
 
 /** util: normalize to dedupe */
 function keyOf(title: string, author: string) {
@@ -200,12 +217,9 @@ function keyOf(title: string, author: string) {
 }
 
 /** util: convert raw items to a de-duped, limited Book[] */
-function toBookList(
-  items: Array<{ title?: string; author?: string }>,
-  limit = 50
-): Book[] {
+function toBookList(items: Array<Partial<SourceBook>>, limit = 50): SourceBook[] {
   const seen = new Set<string>();
-  const result: Book[] = [];
+  const result: SourceBook[] = [];
   for (const it of items) {
     const title = (it.title || "").trim();
     const author = (it.author || "").trim() || "Unknown";
@@ -213,82 +227,82 @@ function toBookList(
     const k = keyOf(title, author);
     if (seen.has(k)) continue;
     seen.add(k);
-    result.push({ id: result.length + 1, title, author });
+    result.push({
+      id: result.length + 1,
+      title,
+      author,
+      workKey: it.workKey,
+      coverId: it.coverId,
+      year: it.year,
+    });
     if (result.length >= limit) break;
   }
   return result;
 }
 
 /** SUBJECTS: https://openlibrary.org/subjects/{subject}.json?limit=50 */
-export async function fetchSubjectBooks(subject: string, limit = 50): Promise<Book[]> {
-  const url = `https://openlibrary.org/subjects/${encodeURIComponent(subject)}.json?limit=${limit}`;
-  try {
-    const res = await fetch(url, { cache: "no-store", headers: { "User-Agent": UA } });
-    if (!res.ok) return [];
-    const data = (await res.json()) as SubjectResponse;
-    const works: SubjectWork[] = Array.isArray(data.works) ? data.works : [];
-    const items = works.map((w) => ({
-      title: w.title,
-      author: w.authors?.[0]?.name || "Unknown",
-    }));
-    return toBookList(items, limit);
-  } catch (err) {
-    console.debug("fetchSubjectBooks error:", err);
-    return [];
-  }
+export async function fetchSubjectBooks(subject: string, limit = 50, offset = 0): Promise<{ items: SourceBook[]; total: number; }> {
+  const url = `https://openlibrary.org/subjects/${encodeURIComponent(subject)}.json?limit=${limit}&offset=${offset}`;
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) return { items: [], total: 0 };
+  const data = await res.json() as SubjectResponse;
+  const works: SubjectWork[] = Array.isArray(data?.works) ? data.works : [];
+
+  const items = works.map((w) => ({
+    title: w.title,
+    author: w.authors?.[0]?.name || "Unknown",
+    workKey: w.key,             // "/works/OLxxxxW"
+    coverId: w.cover_id,        // number
+    year: w.first_publish_year, // number
+  }));
+  return { items: toBookList(items, limit), total: (data?.work_count ?? items.length) };
 }
 
 /** AUTHORS:
  *  1) search:  /search/authors.json?q=NAME
  *  2) works:   /authors/{key}/works.json?limit=200
  */
-export async function fetchAuthorBooks(authorName: string, limit = 50): Promise<Book[]> {
-  try {
-    const s = await fetch(
-      `https://openlibrary.org/search/authors.json?q=${encodeURIComponent(authorName)}`,
-      { cache: "no-store", headers: { "User-Agent": UA } }
-    );
-    if (!s.ok) return [];
-    const sdata = (await s.json()) as AuthorSearchResponse;
-    const authorKey = sdata.docs?.[0]?.key; // e.g. "OL23919A"
-    if (!authorKey) return [];
+export async function fetchAuthorBooks(authorName: string, limit = 50): Promise<SourceBook[]> {
+  const search = await fetch(
+    `https://openlibrary.org/search/authors.json?q=${encodeURIComponent(authorName)}`,
+    { cache: "no-store" }
+  );
+  if (!search.ok) return [];
+  const sdata = await search.json() as AuthorSearchResponse;
+  const authorKey: string | undefined = sdata?.docs?.[0]?.key; // "OL23919A"
+  if (!authorKey) return [];
 
-    const w = await fetch(
-      `https://openlibrary.org/authors/${authorKey}/works.json?limit=200`,
-      { cache: "no-store", headers: { "User-Agent": UA } }
-    );
-    if (!w.ok) return [];
-    const wdata = (await w.json()) as AuthorWorksResponse;
-    const entries: AuthorWorksEntry[] = Array.isArray(wdata.entries) ? wdata.entries : [];
+  const works = await fetch(`https://openlibrary.org/authors/${authorKey}/works.json?limit=200`, {
+    cache: "no-store",
+  });
+  if (!works.ok) return [];
+  const wdata = (await works.json()) as AuthorWorksResponse;
+   const entries: AuthorWorksEntry[] = Array.isArray(wdata?.entries) ? wdata.entries : [];
 
-    const items = entries
-      .filter(
-        (e) =>
-          !Array.isArray(e.subjects) ||
-          !e.subjects.some((s) => /poetry|play|drama|letters|essays/i.test(s))
-      )
-      .map((e) => ({ title: e.title, author: authorName }));
+  const items = entries
+    .filter((e) => !Array.isArray(e.subjects) || !e.subjects.some((s: string) =>
+      /poetry|play|drama|letters|essays/i.test(s)
+    ))
+    .map((e) => ({
+      title: e.title,
+      author: authorName,
+      workKey: e.key,              // "/works/OLxxxxW"
+      coverId: Array.isArray(e.covers) ? e.covers[0] : undefined,
+      year: e.first_publish_date ? parseInt(String(e.first_publish_date).slice(0,4)) : undefined,
+    }));
 
-    return toBookList(items, limit);
-  } catch (err) {
-    console.debug("fetchAuthorBooks error:", err);
-    return [];
-  }
+  return toBookList(items, limit);
 }
 
-export function saveQueue(books: Book[]) {
-  try {
-    localStorage.setItem("bookpickr:queue", JSON.stringify(books));
-  } catch (err) {
-    // Quota or privacy mode can throw; safe to ignore
-    console.debug("saveQueue error:", err);
-  }
+export function saveQueue(sourceBooks: SourceBook[]) {
+  const mapped: Book[] = sourceBooks.map((b, i) => ({
+    id: i + 1,
+    title: b.title,
+    author: b.author,
+  }));
+  localStorage.setItem("bookpickr:queue", JSON.stringify(mapped));
 }
 
 export function clearQueue() {
-  try {
-    localStorage.removeItem("bookpickr:queue");
-  } catch (err) {
-    console.debug("clearQueue error:", err);
-  }
+  localStorage.removeItem("bookpickr:queue");
 }
