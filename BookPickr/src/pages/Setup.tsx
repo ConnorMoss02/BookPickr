@@ -33,7 +33,7 @@ export default function Setup() {
     (async () => {
       setGLoading(true);
       try {
-        const { items, total } = await fetchSubjectBooks(subject, 50, gPage * 50);
+        const { items, total } = await fetchSubjectBooks(subject, 20, gPage * 20);
         if (!alive) return;
         setGenreBooks(items);
         setGTotal(total);
