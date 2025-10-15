@@ -1,6 +1,7 @@
 import { Link, NavLink, Route, Routes } from "react-router-dom";
 import BookPickr from "./components/BookPickr";
 import Setup from "./pages/Setup";
+import BookDetail from "./pages/BookDetail"; 
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<BookPickr />} />
         <Route path="/setup" element={<Setup />} />
+         <Route path="/book/:workId" element={<BookDetail />} />
       </Routes>
     </div>
   );
