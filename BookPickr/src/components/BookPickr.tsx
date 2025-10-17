@@ -187,7 +187,11 @@ export default function BookPickr() {
         {/* Left: active pool label + setup link */}
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {label && (
-            <span className="badge">
+            <span className="badge"
+             style={{
+              visibility: "hidden", // 👈 keeps space but hides the element
+              pointerEvents: "none", // optional — makes it unclickable
+            }}>
               Source:{" "}
               {label.type === "subject"
                 ? `Genre – ${label.value.replaceAll("_", " ")}`
