@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { SourceBook } from "../types";
 import { fetchSubjectBooks, fetchAuthorBooks, saveQueue, clearQueue } from "../lib/openLibrary";
+import AuthorAutocomplete from "../components/AuthorAutocomplete";
+import type { AuthorHit } from "../lib/openLibrary";
 
 const SUBJECTS = [
   "dystopian","science_fiction","fantasy","mystery","romance",
@@ -21,9 +23,10 @@ export default function Setup() {
   const [gPage, setGPage] = useState(0); // page as offset chunks of 50
 
   // author
-  const [author, setAuthor] = useState("");
   const [authorBooks, setAuthorBooks] = useState<SourceBook[]>([]);
   const [aLoading, setALoading] = useState(false);
+  const [authorQuery, setAuthorQuery] = useState("");
+  const [pickedAuthor, setPickedAuthor] = useState<AuthorHit | null>(null);
 
   const nav = useNavigate();
 
@@ -48,7 +51,12 @@ export default function Setup() {
     e.preventDefault();
     setALoading(true);
     try {
-      const books = await fetchAuthorBooks(author, 50);
+      const name = pickedAuthor?.name?.trim() || authorQuery.trim();
+      if (!name) {
+        setAuthorBooks([]);
+        return;
+      }
+      const books = await fetchAuthorBooks(name, 50);
       setAuthorBooks(books);
     } finally {
       setALoading(false);
@@ -131,11 +139,19 @@ export default function Setup() {
       {tab === "author" && (
         <section className="card" style={{ marginTop: 8 }}>
           <form onSubmit={onSearchAuthor} style={{ display: "flex", gap: 8, alignItems:"center", marginBottom: 12, flexWrap: "wrap" }}>
-            <input
-              value={author}
-              onChange={(e) => setAuthor(e.target.value)}
+            <AuthorAutocomplete
+              value={authorQuery}
+              onChange={(v) => {
+                setAuthorQuery(v);
+                setPickedAuthor(null);     
+                setAuthorBooks([]);       
+              }}
+              onPick={(hit) => {
+                setPickedAuthor(hit);          
+                setAuthorQuery(hit.name || "");
+              }}
               placeholder="Search author (e.g., Agatha Christie)"
-              style={{ padding: "8px 12px", borderRadius: 12, border: "1px solid var(--border)", background: "var(--panel)", minWidth: 260 }}
+              inputClassName="input-pill"
             />
             <button className="btn" type="submit">Search</button>
             <span className="badge">{aLoading ? "Searching…" : `${authorBooks.length} books`}</span>

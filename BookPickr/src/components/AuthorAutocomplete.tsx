@@ -11,7 +11,7 @@ type Props = {
   inputStyle?: CSSProperties;
 };
 
-export default function AuthorAutocomplete({ value, onChange, onPick, placeholder, inputClassName, inputStyle, }: Props) {
+export default function AuthorAutocomplete({ value, onChange, onPick, placeholder = "Search author", inputClassName = "input-pill", inputStyle, }: Props) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<AuthorHit[]>([]);
@@ -79,7 +79,7 @@ export default function AuthorAutocomplete({ value, onChange, onPick, placeholde
   }
 
   return (
-    <div ref={boxRef} style={{ position: "relative", width: "100%", maxWidth: 800}}>
+    <div ref={boxRef} style={{ position: "relative", width: "100%" }}>
       <input
         ref={inputRef}
         value={value}
@@ -88,7 +88,7 @@ export default function AuthorAutocomplete({ value, onChange, onPick, placeholde
         onKeyDown={onKeyDown}
         placeholder={placeholder ?? "Search author (e.g., Octavia Butler)"}
         className={inputClassName}  
-        style={inputStyle} 
+        style={{width: "100%",...inputStyle, } }
         aria-autocomplete="list"
         aria-expanded={open}
         aria-controls="author-ac-list"
