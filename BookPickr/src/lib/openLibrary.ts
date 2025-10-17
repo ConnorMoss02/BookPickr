@@ -306,3 +306,58 @@ export function saveQueue(sourceBooks: SourceBook[]) {
 export function clearQueue() {
   localStorage.removeItem("bookpickr:queue");
 }
+
+// Functionality for the autocomplete author search 
+
+// --- Author search -----------------------------------------------------------
+
+export type AuthorHit = {
+  key: string;        // "/authors/OL23919A"
+  name: string;       // "George Orwell"
+  top_work?: string;  // "1984"
+  work_count?: number;
+  birth_date?: string;
+  death_date?: string;
+};
+
+const _authorCache = new Map<string, AuthorHit[]>();
+
+interface OpenLibraryAuthorDoc {
+  key: string;
+  name: string;
+  top_work?: string;
+  work_count?: number;
+  birth_date?: string;
+  death_date?: string;
+}
+
+interface OpenLibraryAuthorResponse {
+  docs?: OpenLibraryAuthorDoc[];
+}
+
+export async function searchAuthors(query: string, limit = 8): Promise<AuthorHit[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const cacheKey = `${q.toLowerCase()}|${limit}`;
+  if (_authorCache.has(cacheKey)) return _authorCache.get(cacheKey)!;
+
+  const url = `https://openlibrary.org/search/authors.json?q=${encodeURIComponent(q)}&limit=${limit}`;
+  const res = await fetch(url);
+  if (!res.ok) return [];
+
+  const data: OpenLibraryAuthorResponse = await res.json();
+  const hits: AuthorHit[] = (data.docs ?? []).map((d) => ({
+    key: d.key,
+    name: d.name,
+    top_work: d.top_work,
+    work_count: d.work_count,
+    birth_date: d.birth_date,
+    death_date: d.death_date,
+  }));
+
+  _authorCache.set(cacheKey, hits);
+  return hits;
+}
+
+
+
