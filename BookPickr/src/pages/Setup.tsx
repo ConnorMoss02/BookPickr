@@ -72,7 +72,7 @@ export default function Setup() {
 
   return (
     <div className="container" style={{ paddingTop: 20 }}>
-      <h1 className="h1">What are you in the mood for?</h1>
+      <h1 className="h1">Picking your next book has never been easier</h1>
       <p className="muted">Pick a genre or author to seed your head-to-head matchups.</p>
 
       <div style={{ display: "flex", gap: 8, margin: "12px 0" }}>
