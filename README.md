@@ -1,5 +1,5 @@
 # 📚 BookPickr  
-**“Your shortcut to a better bookshelf.”**
+**Your shortcut to a better bookshelf.**
 
 ---
 
