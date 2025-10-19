@@ -1,69 +1,96 @@
-# React + TypeScript + Vite
+# 📚 BookPickr
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+**Your shortcut to a better bookshelf**
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Why I Built This
 
-## Expanding the ESLint configuration
+I’ve always loved discovering great books — but every time I look at a massive list like the **New York Times Top 100** or a “Books to Read Before You Die” compilation, I get stuck.  
+How do you actually _choose_ which one to read next?
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+Scrolling through 100 titles feels overwhelming.  
+So I figured… why not make it simple?  
+What if I just compare **two books at a time**?
 
-```js
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+That’s where **BookPickr** came in.  
+It’s my new way to pick what to read — one matchup at a time.  
+Each round, two books go head-to-head. The winner stays; a new challenger appears.  
+After a few rounds, the books with the most wins rise to the top.
 
-      // Remove tseslint.configs.recommended and replace with this
-      ...tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      ...tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      ...tseslint.configs.stylisticTypeChecked,
+At the end, it’s pretty clear which one I actually _want_ to read... usually.
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+---
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## How It Works
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+BookPickr lets you:
 
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+- Choose a starting set of books:
+- From the **New York Times Top 100**, or
+- By **genre** or **author**, using live data from the **Open Library API**
+- Play matchups between two books at a time — “which one would I rather read?”
+- Track your top picks as the app builds your personalized leaderboard
+- Reset and start over whenever you want a fresh set of matchups
+
+---
+
+## Tech Stack
+
+**Frontend**
+
+- [React](https://react.dev) + [Vite](https://vitejs.dev)
+- Whole lotta TypeScript for type safety
+- Custom CSS for a clean, bookstore-inspired aesthetic
+
+**APIs**
+
+- [Open Library API](https://openlibrary.org/developers/api) — for fetching books, authors, and covers
+
+**Deployment**
+
+- Hosted on [Vercel](https://vercel.com)
+
+---
+
+## Running Locally
+
+1. **Clone the repository**
+
+   ```bash
+   git clone https://github.com/ConnorMoss02/BookPickr.git
+   cd BookPickr
+
+   ```
+
+2. Install dependencies:
+   `npm install`
+
+3. Start the development server:
+   `npm run dev`
+
+4. Open in your browser:
+   `http://localhost:5173`
+
+---
+
+## Future Ideas
+
+- User accounts to save matchups and leaderboards
+- “Share your top picks” feature
+- Integration with Goodreads or Libby
+- Upload your own book lists
+- Mood-based or time-based recommendations
+
+---
+
+## Inspiration
+
+BookPickr was born out of curiosity and indecision.  
+I love reading, but there's simply too many good books!
+
+Now, the process feels like a _game_ — and it helps me uncover what I’m genuinely excited to read next.
+
+---
+
+**Built by [Connor Moss](https://github.com/ConnorMoss02)**

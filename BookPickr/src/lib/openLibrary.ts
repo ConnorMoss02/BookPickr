@@ -59,6 +59,8 @@ async function searchDocs(title: string, author: string): Promise<OpenLibraryDoc
     title,
     author,
     limit: "10",
+    language: "eng",
+    lang: "en", 
     fields: "title,author_name,cover_i,isbn,key,work_key,edition_key",
   }).toString();
 

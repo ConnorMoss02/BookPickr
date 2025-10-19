@@ -189,8 +189,8 @@ export default function BookPickr() {
           {label && (
             <span className="badge"
              style={{
-              visibility: "hidden", // 👈 keeps space but hides the element
-              pointerEvents: "none", // optional — makes it unclickable
+              visibility: "hidden", 
+              pointerEvents: "none", 
             }}>
               Source:{" "}
               {label.type === "subject"
