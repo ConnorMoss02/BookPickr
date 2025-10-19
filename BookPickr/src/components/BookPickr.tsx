@@ -5,6 +5,7 @@ import { BOOKS as STATIC_BOOKS } from "../data/books";
 import type { Book } from "../types";
 import BookCard from "./BookCard";
 import { fetchCoverUrl, fetchSynopsis } from "../lib/openLibrary";
+import { makeShareLink, parseShareLink } from "../lib/share"; // already present
 
 // pick random index, avoiding an optional exclude (number or array)
 function getRandomIndex(max: number, exclude?: number | number[]) {
@@ -59,6 +60,9 @@ export default function BookPickr() {
   const [scores, setScores] = useState<Record<number, number>>({});
   const [rounds, setRounds] = useState(0);
 
+  // NEW: small UI feedback for share action
+  const [copied, setCopied] = useState<"idle" | "ok" | "err">("idle"); // NEW
+
   // cover + synopsis for current pair
   const [champCover, setChampCover] = useState<string>();
   const [challCover, setChallCover] = useState<string>();
@@ -82,6 +86,28 @@ export default function BookPickr() {
     setScores({});
     setRounds(0);
   }, [location.key]);
+
+  // NEW: On first render, if URL has a shared session (#s=...), restore it.
+  // This runs independently and does not alter your existing reset logic above.
+  useEffect(() => {
+    const payload = parseShareLink();
+    if (!payload) return;
+
+    // Guard against mismatched pool sizes
+    const safeChampion = Math.min(Math.max(payload.championIndex, 0), Math.max(0, pool.length - 1));
+    const safeScores: Record<number, number> = {};
+    for (const [k, v] of Object.entries(payload.scores)) {
+      const i = Number(k);
+      if (Number.isInteger(i) && i >= 0 && i < pool.length && typeof v === "number") {
+        safeScores[i] = v;
+      }
+    }
+
+    setChampionIndex(safeChampion);
+    setChallengerIndex(getRandomIndex(pool.length, safeChampion));
+    setScores(safeScores);
+    setRounds(payload.rounds);
+  }, [pool.length]); // NEW
 
   // Derived: current books (guard against out-of-range)
   const champion = pool[championIndex] ?? pool[0];
@@ -161,6 +187,26 @@ export default function BookPickr() {
     setChallengerIndex(getRandomIndex(pool.length, first));
     setScores({});
     setRounds(0);
+    // NOTE: not clearing hash here to avoid changing your current reset semantics
+  }
+
+  // NEW: Build + copy share link for the current session (no logic changed elsewhere)
+  async function copyShareLink() {
+    const link = makeShareLink({
+      v: 1,
+      rounds,
+      championIndex,
+      scores,
+    });
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied("ok");
+      setTimeout(() => setCopied("idle"), 1500);
+    } catch {
+      setCopied("err");
+      window.prompt("Copy this link:", link);
+      setTimeout(() => setCopied("idle"), 1500);
+    }
   }
 
   const leaderboard = useMemo(() => {
@@ -204,6 +250,11 @@ export default function BookPickr() {
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span className="badge">Rounds: {rounds}</span>
           <button className="btn" onClick={reset}>Reset</button>
+
+          {/* NEW: Share button */}
+          <button className="btn" onClick={copyShareLink}>
+            {copied === "ok" ? "Link copied ✓" : copied === "err" ? "Copy failed" : "Copy share link"}
+          </button>
         </div>
       </header>
 
