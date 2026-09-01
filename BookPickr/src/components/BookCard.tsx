@@ -1,24 +1,48 @@
 // src/components/BookCard.tsx
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Book } from "../types";
+import { fetchSynopsis } from "../lib/openLibrary";
 
 type Props = {
   book: Book;
   onPick: () => void;
   accent: "left" | "right";
   coverUrl?: string;
-  synopsis?: string;
+  /** Set once the pair has settled, so we don't decode covers we're replacing. */
+  priority?: boolean;
 };
 
-export default function BookCard({
-  book,
-  onPick,
-  accent,
-  coverUrl,
-  synopsis,
-}: Props) {
+export default function BookCard({ book, onPick, accent, coverUrl, priority = false }: Props) {
   const [hover, setHover] = useState(false);
+  const [synopsis, setSynopsis] = useState<string>();
+  const [coverFailed, setCoverFailed] = useState(false);
+
   const iconClass = accent === "left" ? "card-icon card-left" : "card-icon card-right";
+
+  // A new cover url means a new book in this slot — clear the failure flag so
+  // the next book still gets a chance to show its cover.
+  useEffect(() => setCoverFailed(false), [coverUrl]);
+
+  // The synopsis is only ever visible inside the hover tooltip, so there's no
+  // reason to pay for it up front. Fetching here turned two guaranteed
+  // requests per round into zero for anyone who doesn't hover.
+  useEffect(() => {
+    if (!hover) return;
+    let alive = true;
+    (async () => {
+      const text = await fetchSynopsis(book);
+      if (alive) setSynopsis(text);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [hover, book]);
+
+  // Reset when the slot switches books, so we never show the previous
+  // book's blurb under the new one's title.
+  useEffect(() => setSynopsis(undefined), [book.id, book.title]);
+
+  const showCover = coverUrl && !coverFailed;
 
   return (
     <div style={{ position: "relative" }}>
@@ -52,12 +76,19 @@ export default function BookCard({
             flexShrink: 0,
           }}
         >
-          {coverUrl ? (
+          {showCover ? (
             <img
               src={coverUrl}
               alt={`${book.title} cover`}
+              // Intrinsic size matches the slot: no layout shift when it lands,
+              // and the browser never decodes a full-size image for an 80px box.
+              width={80}
+              height={80}
               style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 12 }}
-              loading="eager"
+              loading={priority ? "eager" : "lazy"}
+              decoding="async"
+              fetchPriority={priority ? "high" : "auto"}
+              onError={() => setCoverFailed(true)}
             />
           ) : (
             "📚"

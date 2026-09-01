@@ -2,45 +2,79 @@
 // src/lib/openLibrary.ts
 // Centralized Open Library API helpers for BookPickr
 // ------------------------------------------------------------
+//
+// Performance note: search.json costs ~400-700ms per call. Anything we can
+// answer from a stored workKey/coverId instead is effectively free, so the
+// rule here is: only fall back to search when a book has no identifiers.
 
-import type { Book, SourceBook  } from "../types"; 
-
+import type { Book, SourceBook } from "../types";
 
 // Be polite if you ever call these server-side. In browsers, this header is ignored.
-const UA = "BookPickr/0.1 (contact: conmoss30@gmail.com)";
+const UA = "BookPickr/2.0 (contact: conmoss30@gmail.com)";
 
 /* ----------------------- Types ----------------------- */
-
-interface OpenLibrarySearchResponse {
-  docs: OpenLibraryDoc[];
-}
 
 interface OpenLibraryDoc {
   title?: string;
   author_name?: string[];
   cover_i?: number;
-  isbn?: string[];
   key?: string;
-  work_key?: string[];
-  edition_key?: string[];
+  edition_count?: number;
 }
 
-type WorkDescription =
-  | string
-  | { value?: string; type?: string }
-  | null
-  | undefined;
+interface OpenLibrarySearchResponse {
+  docs?: OpenLibraryDoc[];
+}
+
+type WorkDescription = string | { value?: string; type?: string } | null | undefined;
 
 interface OpenLibraryWork {
   description?: WorkDescription;
+  covers?: number[];
 }
 
-type Maybe<T> = T | undefined;
+/** What we learn about a book once, and never need to look up again. */
+export type BookMeta = {
+  workKey?: string;
+  coverId?: number;
+};
 
 /* --------------------- Caches ------------------------ */
+//
+// Three layers, cheapest first:
+//   1. in-flight promises  — collapses concurrent duplicate requests
+//   2. in-memory Map       — survives re-renders and navigation
+//   3. localStorage        — survives a page reload
 
-const coverCache = new Map<string, string>();
-const synopsisCache = new Map<string, string | null>();
+const META_STORE = "bookpickr:meta";
+const SYNOPSIS_STORE = "bookpickr:synopsis";
+
+function loadStore<T>(name: string): Map<string, T> {
+  try {
+    const raw = localStorage.getItem(name);
+    if (raw) return new Map(Object.entries(JSON.parse(raw) as Record<string, T>));
+  } catch (e) {
+    console.debug(`openLibrary: could not read ${name}`, e);
+  }
+  return new Map();
+}
+
+function saveStore<T>(name: string, map: Map<string, T>) {
+  try {
+    localStorage.setItem(name, JSON.stringify(Object.fromEntries(map)));
+  } catch (e) {
+    // Quota or private mode — the in-memory cache still works.
+    console.debug(`openLibrary: could not persist ${name}`, e);
+  }
+}
+
+const metaCache = loadStore<BookMeta>(META_STORE);
+const synopsisCache = loadStore<string | null>(SYNOPSIS_STORE);
+
+// Keyed the same way as the caches, so two components asking for the same book
+// at the same time share a single network request instead of racing.
+const inFlightMeta = new Map<string, Promise<BookMeta | undefined>>();
+const inFlightSynopsis = new Map<string, Promise<string | undefined>>();
 
 /* -------------------- Utilities ---------------------- */
 
@@ -52,137 +86,178 @@ function nonEmpty(s: unknown): s is string {
   return typeof s === "string" && s.trim().length > 0;
 }
 
+function cacheKey(title: string, author: string): string {
+  return `${normalize(title)}|${normalize(author)}`;
+}
+
+/* ------------------ Cover URLs ----------------------- */
+
+export type CoverSize = "S" | "M" | "L";
+
+/**
+ * Build a cover URL from a numeric id. No network call, no await — the browser
+ * can start downloading the moment the component renders.
+ *
+ * `default=false` makes Open Library 404 instead of serving its grey
+ * placeholder, which lets the <img> onError handler fall back to our own.
+ */
+export function coverUrlFromId(coverId: number, size: CoverSize = "M"): string {
+  return `https://covers.openlibrary.org/b/id/${coverId}-${size}.jpg?default=false`;
+}
+
+/** Cover URL for a book we already have identifiers for, or undefined. */
+export function coverUrlFor(book: Book, size: CoverSize = "M"): string | undefined {
+  if (typeof book.coverId === "number") return coverUrlFromId(book.coverId, size);
+  const cached = metaCache.get(cacheKey(book.title, book.author));
+  return typeof cached?.coverId === "number" ? coverUrlFromId(cached.coverId, size) : undefined;
+}
+
+/** Warm the browser's image cache so the next round paints instantly. */
+export function prefetchCover(book: Book, size: CoverSize = "M") {
+  const url = coverUrlFor(book, size);
+  if (url) new Image().src = url;
+}
+
 /* ------------------ API helpers ---------------------- */
 
 async function searchDocs(title: string, author: string): Promise<OpenLibraryDoc[]> {
   const params = new URLSearchParams({
     title,
     author,
-    limit: "10",
+    limit: "5",
     language: "eng",
-    lang: "en", 
-    fields: "title,author_name,cover_i,isbn,key,work_key,edition_key",
+    // Only the fields we actually read. Dropping isbn/edition_key alone cuts
+    // the response from ~2.5KB to a few hundred bytes.
+    fields: "title,author_name,cover_i,key,edition_count",
   }).toString();
 
-  const res = await fetch(`https://openlibrary.org/search.json?${params}`, {
-    headers: { "User-Agent": UA },
-  });
-
-  if (!res.ok) return [];
-  const data: unknown = await res.json();
-
-  if (
-    typeof data === "object" &&
-    data !== null &&
-    "docs" in data &&
-    Array.isArray((data as OpenLibrarySearchResponse).docs)
-  ) {
-    return (data as OpenLibrarySearchResponse).docs;
+  try {
+    const res = await fetch(`https://openlibrary.org/search.json?${params}`, {
+      headers: { "User-Agent": UA },
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as OpenLibrarySearchResponse;
+    return Array.isArray(data?.docs) ? data.docs : [];
+  } catch (err) {
+    console.debug("searchDocs error:", err);
+    return [];
   }
-
-  return [];
 }
 
-function scoreDocs(docs: OpenLibraryDoc[], title: string, author: string): OpenLibraryDoc[] {
+function bestDoc(docs: OpenLibraryDoc[], title: string, author: string): OpenLibraryDoc | undefined {
   const wantTitle = normalize(title);
   const wantAuthor = normalize(author);
 
   return docs
     .map((d) => {
       const t = normalize(d.title ?? "");
-      const a = normalize((d.author_name?.[0] ?? "") as string);
+      const a = normalize(d.author_name?.[0] ?? "");
       let score = 0;
-      if (t === wantTitle) score += 2;
-      if (a.includes(wantAuthor) || wantAuthor.includes(a)) score += 1;
-      if ((d.isbn?.length ?? 0) > 0) score += 1;
-      if (typeof d.cover_i === "number") score += 1;
+      if (t === wantTitle) score += 4;
+      else if (t.startsWith(wantTitle)) score += 2;
+      if (a === wantAuthor) score += 3;
+      else if (a.includes(wantAuthor) || wantAuthor.includes(a)) score += 1;
+      if (typeof d.cover_i === "number") score += 2;
+      // Prefer the canonical edition over the long tail of reprints and
+      // translations: the work with more editions is the one people mean.
+      score += Math.min(d.edition_count ?? 0, 50) / 100;
       return { d, score };
     })
-    .sort((a, b) => b.score - a.score)
-    .map((x) => x.d);
+    .sort((x, y) => y.score - x.score)[0]?.d;
 }
 
-/* ------------------ Public API ----------------------- */
+/**
+ * Resolve a title/author to Open Library identifiers — ONE search, shared by
+ * every caller. Previously the cover and synopsis paths each ran their own
+ * identical search, doubling the requests for no benefit.
+ */
+export async function lookupBookMeta(title: string, author: string): Promise<BookMeta | undefined> {
+  const key = cacheKey(title, author);
 
-export async function fetchCoverUrl(title: string, author: string): Promise<string | undefined> {
-  const key = `${title}|${author}`;
-  const cached = coverCache.get(key);
+  const cached = metaCache.get(key);
   if (cached) return cached;
 
-  const ranked = scoreDocs(await searchDocs(title, author), title, author);
-  const best = ranked[0];
-  if (!best) return undefined;
+  const pending = inFlightMeta.get(key);
+  if (pending) return pending;
 
-  const candidates: string[] = [];
-  if (typeof best.cover_i === "number") {
-    candidates.push(
-      `https://covers.openlibrary.org/b/id/${best.cover_i}-L.jpg?default=false`,
-      `https://covers.openlibrary.org/b/id/${best.cover_i}-M.jpg?default=false`
-    );
-  }
+  const request = (async (): Promise<BookMeta | undefined> => {
+    const best = bestDoc(await searchDocs(title, author), title, author);
+    const meta: BookMeta = {
+      workKey: nonEmpty(best?.key) ? best.key : undefined,
+      coverId: typeof best?.cover_i === "number" ? best.cover_i : undefined,
+    };
+    metaCache.set(key, meta);
+    saveStore(META_STORE, metaCache);
+    return meta;
+  })().finally(() => inFlightMeta.delete(key));
 
-  const isbns = Array.isArray(best.isbn) ? best.isbn.slice(0, 3) : [];
-  for (const isbn of isbns) {
-    candidates.push(
-      `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg?default=false`,
-      `https://covers.openlibrary.org/b/isbn/${isbn}-M.jpg?default=false`
-    );
-  }
-
-  for (const u of candidates) {
-    const clean = u.replace("?default=false", "");
-    coverCache.set(key, clean);
-    return clean;
-  }
-
-  return undefined;
+  inFlightMeta.set(key, request);
+  return request;
 }
 
-export async function fetchSynopsis(title: string, author: string): Promise<Maybe<string>> {
-  const key = `${title}|${author}`;
+/**
+ * Cover URL for a book, resolving identifiers only if we don't already have
+ * them. Returns immediately for any book carrying a coverId.
+ */
+export async function fetchCoverUrl(book: Book, size: CoverSize = "M"): Promise<string | undefined> {
+  const direct = coverUrlFor(book, size);
+  if (direct) return direct;
+
+  const meta = await lookupBookMeta(book.title, book.author);
+  return typeof meta?.coverId === "number" ? coverUrlFromId(meta.coverId, size) : undefined;
+}
+
+/**
+ * Synopsis for a book. Only ever called on demand (the card fetches it when
+ * hovered) because the text is invisible until then.
+ */
+export async function fetchSynopsis(book: Book): Promise<string | undefined> {
+  const key = cacheKey(book.title, book.author);
+
   if (synopsisCache.has(key)) return synopsisCache.get(key) ?? undefined;
 
-  const ranked = scoreDocs(await searchDocs(title, author), title, author);
-  const best = ranked[0];
-  if (!best) {
-    synopsisCache.set(key, null);
-    return undefined;
-  }
+  const pending = inFlightSynopsis.get(key);
+  if (pending) return pending;
 
-  const workKey =
-    (Array.isArray(best.work_key) ? best.work_key[0] : undefined) ||
-    (nonEmpty(best.key) && best.key.startsWith("/works/") ? best.key : undefined);
+  const request = (async (): Promise<string | undefined> => {
+    // Use the stored workKey when we have one; only search as a last resort.
+    let workKey = book.workKey;
+    if (!nonEmpty(workKey)) {
+      workKey = (await lookupBookMeta(book.title, book.author))?.workKey;
+    }
 
-  try {
-    if (nonEmpty(workKey)) {
-      const res = await fetch(`https://openlibrary.org${workKey}.json`, {
+    const remember = (value: string | null) => {
+      synopsisCache.set(key, value);
+      saveStore(SYNOPSIS_STORE, synopsisCache);
+      return value ?? undefined;
+    };
+
+    if (!nonEmpty(workKey)) return remember(null);
+
+    try {
+      const path = workKey.startsWith("/") ? workKey : `/works/${workKey}`;
+      const res = await fetch(`https://openlibrary.org${path}.json`, {
         headers: { "User-Agent": UA },
       });
-      if (res.ok) {
-        const work = (await res.json()) as OpenLibraryWork;
-        const desc = work?.description;
-        let text: string | undefined;
+      if (!res.ok) return remember(null);
 
-        if (typeof desc === "string") text = desc;
-        else if (desc && typeof (desc as { value?: string }).value === "string")
-          text = (desc as { value?: string }).value;
+      const work = (await res.json()) as OpenLibraryWork;
+      const desc = work?.description;
+      const text = typeof desc === "string" ? desc : desc?.value;
 
-        if (nonEmpty(text)) {
-          const short = text.length > 280 ? text.slice(0, 277) + "…" : text;
-          synopsisCache.set(key, short);
-          return short;
-        }
-      }
+      if (!nonEmpty(text)) return remember(null);
+      return remember(text.length > 280 ? `${text.slice(0, 277)}…` : text);
+    } catch (err) {
+      console.debug("fetchSynopsis error:", err);
+      return remember(null);
     }
-  } catch (err) {
-    console.debug("fetchSynopsis error:", err);
-  }
+  })().finally(() => inFlightSynopsis.delete(key));
 
-  synopsisCache.set(key, null);
-  return undefined;
+  inFlightSynopsis.set(key, request);
+  return request;
 }
 
-/* ------------------ NEW SECTION BELOW ----------------------- */
+/* ------------------ Book pools ----------------------- */
 /* Genre/Author book-pool helpers for setup screen */
 
 interface SubjectAuthor { name?: string }
@@ -191,8 +266,8 @@ interface SubjectWork {
   key?: string;                 // e.g. "/works/OL82563W"
   title?: string;
   authors?: SubjectAuthor[];
-  cover_id?: number;            // numeric cover id
-  first_publish_year?: number;  // e.g. 1954
+  cover_id?: number;
+  first_publish_year?: number;
 }
 
 interface SubjectResponse {
@@ -204,21 +279,16 @@ interface AuthorSearchDoc { key?: string }      // e.g. "OL23919A"
 interface AuthorSearchResponse { docs?: AuthorSearchDoc[] }
 
 interface AuthorWorksEntry {
-  key?: string;                 // e.g. "/works/OL82563W"
+  key?: string;
   title?: string;
-  covers?: number[];            // [8231856, ...]
-  first_publish_date?: string | number; // "1954" or "1954-07-29"
+  covers?: number[];
+  first_publish_date?: string | number;
   subjects?: string[];
 }
 
 interface AuthorWorksResponse { entries?: AuthorWorksEntry[] }
 
-/** util: normalize to dedupe */
-function keyOf(title: string, author: string) {
-  return `${title.trim().toLowerCase()}|${author.trim().toLowerCase()}`;
-}
-
-/** util: convert raw items to a de-duped, limited Book[] */
+/** util: convert raw items to a de-duped, limited SourceBook[] */
 function toBookList(items: Array<Partial<SourceBook>>, limit = 50): SourceBook[] {
   const seen = new Set<string>();
   const result: SourceBook[] = [];
@@ -226,7 +296,7 @@ function toBookList(items: Array<Partial<SourceBook>>, limit = 50): SourceBook[]
     const title = (it.title || "").trim();
     const author = (it.author || "").trim() || "Unknown";
     if (!title) continue;
-    const k = keyOf(title, author);
+    const k = cacheKey(title, author);
     if (seen.has(k)) continue;
     seen.add(k);
     result.push({
@@ -243,21 +313,25 @@ function toBookList(items: Array<Partial<SourceBook>>, limit = 50): SourceBook[]
 }
 
 /** SUBJECTS: https://openlibrary.org/subjects/{subject}.json?limit=50 */
-export async function fetchSubjectBooks(subject: string, limit = 50, offset = 0): Promise<{ items: SourceBook[]; total: number; }> {
+export async function fetchSubjectBooks(
+  subject: string,
+  limit = 50,
+  offset = 0
+): Promise<{ items: SourceBook[]; total: number }> {
   const url = `https://openlibrary.org/subjects/${encodeURIComponent(subject)}.json?limit=${limit}&offset=${offset}`;
-  const res = await fetch(url, { cache: "no-store" });
+  const res = await fetch(url);
   if (!res.ok) return { items: [], total: 0 };
-  const data = await res.json() as SubjectResponse;
+  const data = (await res.json()) as SubjectResponse;
   const works: SubjectWork[] = Array.isArray(data?.works) ? data.works : [];
 
   const items = works.map((w) => ({
     title: w.title,
     author: w.authors?.[0]?.name || "Unknown",
-    workKey: w.key,             // "/works/OLxxxxW"
-    coverId: w.cover_id,        // number
-    year: w.first_publish_year, // number
+    workKey: w.key,
+    coverId: w.cover_id,
+    year: w.first_publish_year,
   }));
-  return { items: toBookList(items, limit), total: (data?.work_count ?? items.length) };
+  return { items: toBookList(items, limit), total: data?.work_count ?? items.length };
 }
 
 /** AUTHORS:
@@ -266,41 +340,49 @@ export async function fetchSubjectBooks(subject: string, limit = 50, offset = 0)
  */
 export async function fetchAuthorBooks(authorName: string, limit = 50): Promise<SourceBook[]> {
   const search = await fetch(
-    `https://openlibrary.org/search/authors.json?q=${encodeURIComponent(authorName)}`,
-    { cache: "no-store" }
+    `https://openlibrary.org/search/authors.json?q=${encodeURIComponent(authorName)}`
   );
   if (!search.ok) return [];
-  const sdata = await search.json() as AuthorSearchResponse;
-  const authorKey: string | undefined = sdata?.docs?.[0]?.key; // "OL23919A"
+  const sdata = (await search.json()) as AuthorSearchResponse;
+  const authorKey = sdata?.docs?.[0]?.key;
   if (!authorKey) return [];
 
-  const works = await fetch(`https://openlibrary.org/authors/${authorKey}/works.json?limit=200`, {
-    cache: "no-store",
-  });
+  const works = await fetch(`https://openlibrary.org/authors/${authorKey}/works.json?limit=200`);
   if (!works.ok) return [];
   const wdata = (await works.json()) as AuthorWorksResponse;
-   const entries: AuthorWorksEntry[] = Array.isArray(wdata?.entries) ? wdata.entries : [];
+  const entries: AuthorWorksEntry[] = Array.isArray(wdata?.entries) ? wdata.entries : [];
 
   const items = entries
-    .filter((e) => !Array.isArray(e.subjects) || !e.subjects.some((s: string) =>
-      /poetry|play|drama|letters|essays/i.test(s)
-    ))
+    .filter(
+      (e) =>
+        !Array.isArray(e.subjects) ||
+        !e.subjects.some((s) => /poetry|play|drama|letters|essays/i.test(s))
+    )
     .map((e) => ({
       title: e.title,
       author: authorName,
-      workKey: e.key,              // "/works/OLxxxxW"
+      workKey: e.key,
       coverId: Array.isArray(e.covers) ? e.covers[0] : undefined,
-      year: e.first_publish_date ? parseInt(String(e.first_publish_date).slice(0,4)) : undefined,
+      year: e.first_publish_date
+        ? parseInt(String(e.first_publish_date).slice(0, 4))
+        : undefined,
     }));
 
   return toBookList(items, limit);
 }
 
+/* ------------------ Queue storage -------------------- */
+
 export function saveQueue(sourceBooks: SourceBook[]) {
+  // Keep workKey/coverId. Dropping them here was the single most expensive
+  // thing the app did: setup already knew every cover id, and throwing them
+  // away forced the picker to re-derive each one with a slow search.
   const mapped: Book[] = sourceBooks.map((b, i) => ({
     id: i + 1,
     title: b.title,
     author: b.author,
+    workKey: b.workKey,
+    coverId: b.coverId,
   }));
   localStorage.setItem("bookpickr:queue", JSON.stringify(mapped));
 }
@@ -309,20 +391,19 @@ export function clearQueue() {
   localStorage.removeItem("bookpickr:queue");
 }
 
-// Functionality for the autocomplete author search 
-
-// --- Author search -----------------------------------------------------------
+/* ------------------ Author autocomplete -------------- */
 
 export type AuthorHit = {
   key: string;        // "/authors/OL23919A"
   name: string;       // "George Orwell"
-  top_work?: string;  // "1984"
+  top_work?: string;
   work_count?: number;
   birth_date?: string;
   death_date?: string;
 };
 
 const _authorCache = new Map<string, AuthorHit[]>();
+const _authorInFlight = new Map<string, Promise<AuthorHit[]>>();
 
 interface OpenLibraryAuthorDoc {
   key: string;
@@ -340,26 +421,36 @@ interface OpenLibraryAuthorResponse {
 export async function searchAuthors(query: string, limit = 8): Promise<AuthorHit[]> {
   const q = query.trim();
   if (!q) return [];
-  const cacheKey = `${q.toLowerCase()}|${limit}`;
-  if (_authorCache.has(cacheKey)) return _authorCache.get(cacheKey)!;
 
-  const url = `https://openlibrary.org/search/authors.json?q=${encodeURIComponent(q)}&limit=${limit}`;
-  const res = await fetch(url);
-  if (!res.ok) return [];
+  const key = `${q.toLowerCase()}|${limit}`;
+  const cached = _authorCache.get(key);
+  if (cached) return cached;
 
-  const data: OpenLibraryAuthorResponse = await res.json();
-  const hits: AuthorHit[] = (data.docs ?? []).map((d) => ({
-    key: d.key,
-    name: d.name,
-    top_work: d.top_work,
-    work_count: d.work_count,
-    birth_date: d.birth_date,
-    death_date: d.death_date,
-  }));
+  const pending = _authorInFlight.get(key);
+  if (pending) return pending;
 
-  _authorCache.set(cacheKey, hits);
-  return hits;
+  const request = (async (): Promise<AuthorHit[]> => {
+    const url = `https://openlibrary.org/search/authors.json?q=${encodeURIComponent(q)}&limit=${limit}`;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return [];
+      const data = (await res.json()) as OpenLibraryAuthorResponse;
+      const hits: AuthorHit[] = (data.docs ?? []).map((d) => ({
+        key: d.key,
+        name: d.name,
+        top_work: d.top_work,
+        work_count: d.work_count,
+        birth_date: d.birth_date,
+        death_date: d.death_date,
+      }));
+      _authorCache.set(key, hits);
+      return hits;
+    } catch (err) {
+      console.debug("searchAuthors error:", err);
+      return [];
+    }
+  })().finally(() => _authorInFlight.delete(key));
+
+  _authorInFlight.set(key, request);
+  return request;
 }
-
-
-
