@@ -56,7 +56,9 @@ export default function Setup() {
         setAuthorBooks([]);
         return;
       }
-      const books = await fetchAuthorBooks(name, 50);
+      // Pass the resolved key when the user picked from the dropdown: it
+      // matches that exact author instead of fuzzily on the name.
+      const books = await fetchAuthorBooks(name, 50, pickedAuthor?.key);
       setAuthorBooks(books);
     } finally {
       setALoading(false);

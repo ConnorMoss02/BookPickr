@@ -20,6 +20,7 @@ interface OpenLibraryDoc {
   cover_i?: number;
   key?: string;
   edition_count?: number;
+  first_publish_year?: number;
 }
 
 interface OpenLibrarySearchResponse {
@@ -88,6 +89,26 @@ function nonEmpty(s: unknown): s is string {
 
 function cacheKey(title: string, author: string): string {
   return `${normalize(title)}|${normalize(author)}`;
+}
+
+// Open Library lists every translation of a work under the same author, so an
+// author's shelf comes back full of editions nobody browsing an English app
+// can read. These two guards drop them.
+
+/** Titles written in a non-Latin script — Hebrew, Cyrillic, CJK and friends. */
+const NON_LATIN_SCRIPT =
+  /[\p{Script=Hebrew}\p{Script=Arabic}\p{Script=Cyrillic}\p{Script=Greek}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Devanagari}\p{Script=Thai}\p{Script=Armenian}\p{Script=Georgian}]/u;
+
+/**
+ * Romanized transliterations ("ha-Aḥavah", "Tiḳ śaḳnai"). They're Latin script,
+ * so the check above misses them, but they lean on Latin Extended Additional
+ * diacritics that essentially never appear in an English title. Ordinary
+ * accents (café, Brontë) live in Latin-1 and are deliberately left alone.
+ */
+const TRANSLITERATION_MARKS = /[\u1E00-\u1EFF]/;
+
+function isReadableTitle(title: string): boolean {
+  return !NON_LATIN_SCRIPT.test(title) && !TRANSLITERATION_MARKS.test(title);
 }
 
 /* ------------------ Cover URLs ----------------------- */
@@ -275,18 +296,8 @@ interface SubjectResponse {
   work_count?: number;
 }
 
-interface AuthorSearchDoc { key?: string }      // e.g. "OL23919A"
+interface AuthorSearchDoc { key?: string; work_count?: number }  // e.g. "OL23919A"
 interface AuthorSearchResponse { docs?: AuthorSearchDoc[] }
-
-interface AuthorWorksEntry {
-  key?: string;
-  title?: string;
-  covers?: number[];
-  first_publish_date?: string | number;
-  subjects?: string[];
-}
-
-interface AuthorWorksResponse { entries?: AuthorWorksEntry[] }
 
 /** util: convert raw items to a de-duped, limited SourceBook[] */
 function toBookList(items: Array<Partial<SourceBook>>, limit = 50): SourceBook[] {
@@ -324,48 +335,78 @@ export async function fetchSubjectBooks(
   const data = (await res.json()) as SubjectResponse;
   const works: SubjectWork[] = Array.isArray(data?.works) ? data.works : [];
 
-  const items = works.map((w) => ({
-    title: w.title,
-    author: w.authors?.[0]?.name || "Unknown",
-    workKey: w.key,
-    coverId: w.cover_id,
-    year: w.first_publish_year,
-  }));
+  const items = works
+    .filter((w) => nonEmpty(w.title) && isReadableTitle(w.title))
+    .filter((w) => typeof w.cover_id === "number")
+    .map((w) => ({
+      title: w.title,
+      author: w.authors?.[0]?.name || "Unknown",
+      workKey: w.key,
+      coverId: w.cover_id,
+      year: w.first_publish_year,
+    }));
   return { items: toBookList(items, limit), total: data?.work_count ?? items.length };
 }
 
-/** AUTHORS:
- *  1) search:  /search/authors.json?q=NAME
- *  2) works:   /authors/{key}/works.json?limit=200
+/**
+ * Books by an author.
+ *
+ * Previously this read /authors/{key}/works.json, which returns every work in
+ * every language with no ordering — for a heavily translated author like
+ * Grisham that meant 200 arbitrary rows out of 683, nearly all of them foreign
+ * editions with no cover.
+ *
+ * search.json can filter by language and sort by popularity, and when we know
+ * the author's key it matches exactly instead of fuzzily on the name.
  */
-export async function fetchAuthorBooks(authorName: string, limit = 50): Promise<SourceBook[]> {
-  const search = await fetch(
-    `https://openlibrary.org/search/authors.json?q=${encodeURIComponent(authorName)}`
-  );
-  if (!search.ok) return [];
-  const sdata = (await search.json()) as AuthorSearchResponse;
-  const authorKey = sdata?.docs?.[0]?.key;
-  if (!authorKey) return [];
+export async function fetchAuthorBooks(
+  authorName: string,
+  limit = 50,
+  authorKey?: string
+): Promise<SourceBook[]> {
+  // Prefer the key the autocomplete already resolved. Falling back to a name
+  // search also picks the most prolific match rather than blindly taking the
+  // first, which used to land on a different author of the same name.
+  let key = authorKey?.replace(/^\/authors\//, "");
 
-  const works = await fetch(`https://openlibrary.org/authors/${authorKey}/works.json?limit=200`);
-  if (!works.ok) return [];
-  const wdata = (await works.json()) as AuthorWorksResponse;
-  const entries: AuthorWorksEntry[] = Array.isArray(wdata?.entries) ? wdata.entries : [];
+  if (!nonEmpty(key)) {
+    const search = await fetch(
+      `https://openlibrary.org/search/authors.json?q=${encodeURIComponent(authorName)}`
+    );
+    if (!search.ok) return [];
+    const sdata = (await search.json()) as AuthorSearchResponse;
+    const best = (sdata?.docs ?? [])
+      .slice(0, 5)
+      .sort((a, b) => (b.work_count ?? 0) - (a.work_count ?? 0))[0];
+    key = best?.key?.replace(/^\/authors\//, "");
+    if (!nonEmpty(key)) return [];
+  }
 
-  const items = entries
-    .filter(
-      (e) =>
-        !Array.isArray(e.subjects) ||
-        !e.subjects.some((s) => /poetry|play|drama|letters|essays/i.test(s))
-    )
-    .map((e) => ({
-      title: e.title,
-      author: authorName,
-      workKey: e.key,
-      coverId: Array.isArray(e.covers) ? e.covers[0] : undefined,
-      year: e.first_publish_date
-        ? parseInt(String(e.first_publish_date).slice(0, 4))
-        : undefined,
+  const params = new URLSearchParams({
+    author_key: key,
+    language: "eng",
+    sort: "readinglog", // most-shelved first, i.e. the ones people mean
+    // Over-fetch, because filtering for covers and readable titles thins it out.
+    limit: String(Math.min(limit * 3, 200)),
+    fields: "title,author_name,cover_i,key,edition_count,first_publish_year",
+  }).toString();
+
+  const res = await fetch(`https://openlibrary.org/search.json?${params}`);
+  if (!res.ok) return [];
+  const data = (await res.json()) as OpenLibrarySearchResponse;
+  const docs = Array.isArray(data?.docs) ? data.docs : [];
+
+  const items = docs
+    .filter((d) => nonEmpty(d.title) && isReadableTitle(d.title))
+    // A row with no cover renders as a bare emoji, which is just visual noise
+    // in a list whose whole job is helping you recognise a book.
+    .filter((d) => typeof d.cover_i === "number")
+    .map((d) => ({
+      title: d.title,
+      author: d.author_name?.[0] || authorName,
+      workKey: d.key,
+      coverId: d.cover_i,
+      year: d.first_publish_year,
     }));
 
   return toBookList(items, limit);
