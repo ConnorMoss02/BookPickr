@@ -476,14 +476,20 @@ export async function searchAuthors(query: string, limit = 8): Promise<AuthorHit
       const res = await fetch(url);
       if (!res.ok) return [];
       const data = (await res.json()) as OpenLibraryAuthorResponse;
-      const hits: AuthorHit[] = (data.docs ?? []).map((d) => ({
-        key: d.key,
-        name: d.name,
-        top_work: d.top_work,
-        work_count: d.work_count,
-        birth_date: d.birth_date,
-        death_date: d.death_date,
-      }));
+      const hits: AuthorHit[] = (data.docs ?? [])
+        .map((d) => ({
+          key: d.key,
+          name: d.name,
+          top_work: d.top_work,
+          work_count: d.work_count,
+          birth_date: d.birth_date,
+          death_date: d.death_date,
+        }))
+        // Open Library carries duplicate author records, and relevance alone
+        // often ranks a 4-work stub above the real writer — especially when the
+        // canonical record is filed under a non-English name. Whoever has the
+        // most works is essentially always the one being searched for.
+        .sort((a, b) => (b.work_count ?? 0) - (a.work_count ?? 0));
       _authorCache.set(key, hits);
       return hits;
     } catch (err) {
