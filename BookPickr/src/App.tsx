@@ -1,7 +1,12 @@
+import { lazy, Suspense } from "react";
 import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 import BookPickr from "./components/BookPickr";
-import Setup from "./pages/Setup";
-import BookDetail from "./pages/BookDetail"; 
+
+// The picker is the landing route, so it stays in the main bundle. Setup and
+// the detail page are only reachable by navigation — splitting them keeps
+// their code (and the autocomplete) out of the initial download.
+const Setup = lazy(() => import("./pages/Setup"));
+const BookDetail = lazy(() => import("./pages/BookDetail"));
 
 export default function App() {
   const location = useLocation();
@@ -14,21 +19,29 @@ export default function App() {
 
         {/* Only show the Setup link when NOT on /setup */}
         {!onSetupPage && (
-          <NavLink to="/setup" className="chip">Setup</NavLink>
+          <NavLink
+            to="/setup"
+            className="chip"
+            // Start downloading the setup chunk on hover, so the click feels
+            // instant rather than showing the fallback.
+            onMouseEnter={() => void import("./pages/Setup")}
+          >
+            Setup
+          </NavLink>
         )}
 
         <div style={{ marginLeft: "auto" }} />
-        {/* (optional) other nav items go here */}
       </nav>
 
       <main>
-        <Routes>
-          <Route path="/" element={<BookPickr />} />
-          <Route path="/setup" element={<Setup />} />
-          <Route path="/book/:workId" element={<BookDetail />} />
-        </Routes>
+        <Suspense fallback={<div className="container" style={{ paddingTop: 20 }}><p className="muted">Loading…</p></div>}>
+          <Routes>
+            <Route path="/" element={<BookPickr />} />
+            <Route path="/setup" element={<Setup />} />
+            <Route path="/book/:workId" element={<BookDetail />} />
+          </Routes>
+        </Suspense>
       </main>
     </div>
   );
 }
-

@@ -119,7 +119,7 @@ export default function Setup() {
             {genreBooks.map(b => (
               <li key={b.id} style={{ display:"flex", alignItems:"center", gap:12 }}>
                 <div className="card-icon" style={{ width: 40, height: 40 }}>
-                  {coverURL(b) ? <img src={coverURL(b)!} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", borderRadius: 8 }} /> : "📚"}
+                  {coverURL(b) ? <img src={coverURL(b)!} alt="" width={40} height={40} loading="lazy" decoding="async" style={{ width:"100%", height:"100%", objectFit:"cover", borderRadius: 8 }} /> : "📚"}
                 </div>
                 <div style={{ flex:1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{b.title}</div>
@@ -165,7 +165,7 @@ export default function Setup() {
             {authorBooks.map(b => (
               <li key={b.id} style={{ display:"flex", alignItems:"center", gap:12 }}>
                 <div className="card-icon" style={{ width: 40, height: 40 }}>
-                  {b.coverId ? <img src={`https://covers.openlibrary.org/b/id/${b.coverId}-S.jpg`} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", borderRadius: 8 }} /> : "📚"}
+                  {b.coverId ? <img src={coverURL(b)!} alt="" width={40} height={40} loading="lazy" decoding="async" style={{ width:"100%", height:"100%", objectFit:"cover", borderRadius: 8 }} /> : "📚"}
                 </div>
                 <div style={{ flex:1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{b.title}</div>

@@ -2,9 +2,18 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vite + React + TS</title>
+
+    <!-- Open the TLS connection to the cover CDN while the JS bundle is still
+         parsing, so the first cover request doesn't pay for DNS + handshake. -->
+    <link rel="preconnect" href="https://covers.openlibrary.org" crossorigin />
+    <link rel="preconnect" href="https://openlibrary.org" crossorigin />
+    <link rel="dns-prefetch" href="https://covers.openlibrary.org" />
+    <link rel="dns-prefetch" href="https://openlibrary.org" />
+
+    <title>BookPickr</title>
+    <meta name="description" content="Head-to-head matchups to help you pick your next book." />
   </head>
   <body>
     <div id="root"></div>
