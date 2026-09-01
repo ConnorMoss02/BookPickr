@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { SourceBook } from "../types";
 import { fetchSubjectBooks, fetchAuthorBooks, saveQueue, clearQueue } from "../lib/openLibrary";
@@ -27,6 +27,8 @@ export default function Setup() {
   const [aLoading, setALoading] = useState(false);
   const [authorQuery, setAuthorQuery] = useState("");
   const [pickedAuthor, setPickedAuthor] = useState<AuthorHit | null>(null);
+  // The author whose results are on screen, for the empty-state message.
+  const [searchedAuthor, setSearchedAuthor] = useState("");
 
   const nav = useNavigate();
 
@@ -47,22 +49,30 @@ export default function Setup() {
     return () => { alive = false; };
   }, [subject, gPage]);
 
-  async function onSearchAuthor(e: React.FormEvent) {
-    e.preventDefault();
+  // Takes the author explicitly rather than reading state, so it can be called
+  // straight from onPick — where the new selection hasn't been committed yet.
+  const runAuthorSearch = useCallback(async (hit: AuthorHit | null, typed: string) => {
+    const name = hit?.name?.trim() || typed.trim();
+    if (!name) {
+      setAuthorBooks([]);
+      setSearchedAuthor("");
+      return;
+    }
+    setSearchedAuthor(name);
     setALoading(true);
     try {
-      const name = pickedAuthor?.name?.trim() || authorQuery.trim();
-      if (!name) {
-        setAuthorBooks([]);
-        return;
-      }
       // Pass the resolved key when the user picked from the dropdown: it
       // matches that exact author instead of fuzzily on the name.
-      const books = await fetchAuthorBooks(name, 50, pickedAuthor?.key);
+      const books = await fetchAuthorBooks(name, 50, hit?.key);
       setAuthorBooks(books);
     } finally {
       setALoading(false);
     }
+  }, []);
+
+  function onSearchAuthor(e: React.FormEvent) {
+    e.preventDefault();
+    void runAuthorSearch(pickedAuthor, authorQuery);
   }
 
   function applyQueue(books: SourceBook[]) {
@@ -145,12 +155,15 @@ export default function Setup() {
               value={authorQuery}
               onChange={(v) => {
                 setAuthorQuery(v);
-                setPickedAuthor(null);     
-                setAuthorBooks([]);       
+                setPickedAuthor(null);
+                setAuthorBooks([]);
+                setSearchedAuthor("");
               }}
               onPick={(hit) => {
-                setPickedAuthor(hit);          
+                setPickedAuthor(hit);
                 setAuthorQuery(hit.name || "");
+                // Selecting an author IS the search — no second click needed.
+                void runAuthorSearch(hit, hit.name || "");
               }}
               placeholder="Search author (e.g., Agatha Christie)"
               inputClassName="input-pill"
@@ -161,6 +174,17 @@ export default function Setup() {
               Use these in BookPickr
             </button>
           </form>
+
+          {/* An author can legitimately have nothing we can show — a sparse
+              duplicate record, or no English editions with covers. Say so
+              rather than leaving an unexplained blank panel. */}
+          {!aLoading && searchedAuthor && authorBooks.length === 0 && (
+            <p className="muted" style={{ padding: "8px 2px" }}>
+              No English editions with covers found for {searchedAuthor}. Some
+              Open Library entries are duplicates holding only a handful of
+              works — try another match from the dropdown.
+            </p>
+          )}
 
           {/* Scrollable author results */}
           <ul className="list" style={{ maxHeight: 360, overflow: "auto" }}>

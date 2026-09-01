@@ -21,25 +21,45 @@ export default function AuthorAutocomplete({ value, onChange, onPick, placeholde
 
   // Debounce the query
   const debounced = useDebounced(value, 180);
+  const query = debounced.value;
+
+  // Choosing an author writes their name into the input, which looks exactly
+  // like typing and would re-run the lookup and pop the menu straight back
+  // open.
+  //
+  // Rather than a "skip the next pass" flag, remember *which name* came from a
+  // selection and suppress only while the box still holds exactly that. A flag
+  // has to be cleared by some later event, and any event you pick can fail to
+  // arrive — leaving it stuck and silently swallowing the next search. This
+  // compares state instead, so it cannot wedge.
+  const selectedName = useRef<string | null>(null);
 
   useEffect(() => {
+    if (selectedName.current !== null && query.trim() === selectedName.current.trim()) {
+      setLoading(false);
+      setOpen(false);
+      return;
+    }
+
     let alive = true;
     (async () => {
-      const q = debounced.trim();
+      const q = query.trim();
       if (!q) {
         setResults([]); setOpen(false);
         return;
       }
       setLoading(true);
       const hits = await searchAuthors(q, 8);
-      if (!alive) return;
+      // A lookup already in flight when the user picked must not reopen the
+      // menu underneath them.
+      if (!alive || query.trim() === selectedName.current?.trim()) return;
       setResults(hits);
       setOpen(hits.length > 0);
       setHighlight(0);
       setLoading(false);
     })();
     return () => { alive = false; };
-  }, [debounced]);
+  }, [debounced, query]);
 
   // close when clicking outside
   useEffect(() => {
@@ -53,8 +73,12 @@ export default function AuthorAutocomplete({ value, onChange, onPick, placeholde
   function choose(idx: number) {
     const hit = results[idx];
     if (!hit) return;
-    onPick(hit);
+    selectedName.current = hit.name ?? "";
     setOpen(false);
+    // Picking an author is the search: nobody selects a name and then wants
+    // to press Enter to confirm it.
+    onPick(hit);
+    inputRef.current?.blur();
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -83,8 +107,13 @@ export default function AuthorAutocomplete({ value, onChange, onPick, placeholde
       <input
         ref={inputRef}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onFocus={() => setOpen(results.length > 0)}
+        onChange={(e) => {
+          // A real edit means the text is the user's again, not the
+          // selection's — so retyping the same name still opens the menu.
+          selectedName.current = null;
+          onChange(e.target.value);
+        }}
+        onFocus={() => { if (value.trim() !== selectedName.current?.trim()) setOpen(results.length > 0); }}
         onKeyDown={onKeyDown}
         placeholder={placeholder ?? "Search author (e.g., Octavia Butler)"}
         className={inputClassName}  
@@ -144,12 +173,20 @@ export default function AuthorAutocomplete({ value, onChange, onPick, placeholde
   );
 }
 
-/** Small debounce hook */
-function useDebounced<T>(value: T, delay = 200) {
-  const [debounced, setDebounced] = useState(value);
+/**
+ * Debounce that reports every settle, not just every change.
+ *
+ * Returning the bare value means a round trip — clear the field and retype the
+ * same name inside the debounce window — lands on the value React already
+ * holds. It bails out of the update, the effect never re-runs, and the search
+ * silently never happens. The counter makes each settle a distinct object, so
+ * consumers see it even when the text is unchanged.
+ */
+function useDebounced<T>(value: T, delay = 200): { value: T; seq: number } {
+  const [settled, setSettled] = useState({ value, seq: 0 });
   useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), delay);
+    const t = setTimeout(() => setSettled((s) => ({ value, seq: s.seq + 1 })), delay);
     return () => clearTimeout(t);
   }, [value, delay]);
-  return debounced;
+  return settled;
 }
